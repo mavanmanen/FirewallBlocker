@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Security.Principal;
 using WindowsFirewallHelper;
 
 namespace FirewallBlocker
@@ -14,7 +15,9 @@ namespace FirewallBlocker
     {
         static void Main(string[] args)
         {
-            if(args.Any())
+            RestartIfNotAdmin(args);
+
+            if (args.Any())
             {
                 AddFirewallRules(args[0], args[1], args[2]);
             }
@@ -25,6 +28,38 @@ namespace FirewallBlocker
 
             Console.Write("Press a key to exit.");
             Console.ReadKey();
+        }
+
+        private static void RestartIfNotAdmin(string[] args)
+        {
+            WindowsIdentity identity = WindowsIdentity.GetCurrent();
+            var principal = new WindowsPrincipal(identity);
+
+            if(principal.IsInRole(WindowsBuiltInRole.Administrator))
+            {
+                return;
+            }
+
+            var processInfo = new ProcessStartInfo(GetExecutableLocation())
+            {
+                UseShellExecute = true,
+                Verb = "runas",
+                Arguments = string.Join(" ", args)
+            };
+
+            try
+            {
+                Process.Start(processInfo);
+            }
+            catch (Exception)
+            {
+                Console.WriteLine("Failed to run as admin.");
+                Console.Write("Press a key to exit.");
+                Console.ReadKey();
+                Environment.Exit(1);
+            }
+
+            Environment.Exit(0);
         }
 
         private static void AddFirewallRules(string action, string direction, string file)
@@ -59,10 +94,10 @@ namespace FirewallBlocker
             return rule;
         }
 
+        private static string GetExecutableLocation() => Assembly.GetExecutingAssembly().Location;
+
         private static void InstallContextMenu()
         {
-            string currentLocation = Assembly.GetExecutingAssembly().Location;
-
             RegistryKey firewall = Registry
                 .ClassesRoot
                 .OpenOrCreateSubKey(@"exefile\shell\firewall");
@@ -94,7 +129,7 @@ namespace FirewallBlocker
                     subCommand.SetValue("MUIVerb", subCommandName);
 
                     RegistryKey subCommandCommand = subCommand.OpenOrCreateSubKey("command");
-                    subCommandCommand.SetValue("", $"{currentLocation} {commandName} {subCommandName} \"%1\"");
+                    subCommandCommand.SetValue("", $"{GetExecutableLocation()} {commandName} {subCommandName} \"%1\"");
                 }
 
                 command.SetValue("SubCommands", string.Join(";", subCommandVerbs));
